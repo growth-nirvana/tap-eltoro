@@ -1,0 +1,113 @@
+version: 1
+send_anonymous_usage_stats: true
+project_id: "tap-eltoro"
+default_environment: production
+venv:
+  backend: uv
+environments:
+- name: development
+  config:
+    plugins:
+      extractors:
+      - name: tap-eltoro
+        config:
+          environment: development
+          base_url: https://platform.api.dev.eltoro.com
+- name: production
+  config:
+    plugins:
+      extractors:
+      - name: tap-eltoro
+        config:
+          environment: production
+          base_url: https://platform.api.eltoro.com
+plugins:
+  extractors:
+  - name: "tap-eltoro"
+    namespace: "tap_eltoro"
+    pip_url: -e .
+    executable: tap-eltoro
+    capabilities:
+    - state
+    - catalog
+    - discover
+    - about
+    - stream-maps
+
+    settings:
+    - name: environment
+      kind: string
+      label: Environment
+      description: The environment to connect to (development or production)
+      options:
+      - development
+      - production
+
+    - name: client_id
+      kind: password
+      label: Client ID
+      description: OAuth2 Client ID for authentication
+      sensitive: true
+
+    - name: client_secret
+      kind: password
+      label: Client Secret
+      description: OAuth2 Client Secret for authentication
+      sensitive: true
+
+    - name: base_url
+      kind: string
+      label: Base URL
+      description: The base URL for the API service (environment-specific)
+
+    - name: scope
+      kind: string
+      label: OAuth2 Scope
+      description: Optional OAuth2 scope for token requests
+
+    - name: start_date
+      kind: date_iso8601
+      label: Start Date
+      description: The earliest record date to sync
+
+    - name: request_timeout
+      kind: integer
+      label: Request Timeout
+      description: Request timeout in seconds
+      default: 60
+
+    - name: max_retries
+      kind: integer
+      label: Max Retries
+      description: Maximum number of retries for failed requests
+      default: 3
+
+    - name: retry_backoff_base
+      kind: integer
+      label: Retry Backoff Base
+      description: Base for exponential backoff retry delays (integer)
+      default: 2
+
+    - name: user_agent
+      kind: string
+      label: User Agent
+      description: A custom User-Agent header to send with each request
+
+    settings_group_validation:
+    - [environment, client_id, client_secret]
+
+    config:
+      environment: production
+      base_url: https://platform.api.eltoro.com
+      request_timeout: 60
+      max_retries: 3
+      retry_backoff_base: 2.0
+
+    secrets:
+      client_id: ${TAP_ELTORO_CLIENT_ID}
+      client_secret: ${TAP_ELTORO_CLIENT_SECRET}
+
+  loaders:
+  - name: target-jsonl
+    variant: andyh1203
+    pip_url: target-jsonl
