@@ -63,11 +63,21 @@ class ElToroStream(RESTStream):
         Returns:
             An authenticator instance.
         """
+        # Get environment-specific auth endpoint
+        environment = self.config.get("environment", "production")
+        if environment == "development":
+            auth_endpoint = "https://auth.api.dev.eltoro.com/auth/realms/eltoro/protocol/openid-connect/token"
+        else:
+            auth_endpoint = "https://auth.api.eltoro.com/auth/realms/eltoro/protocol/openid-connect/token"
+        
+        # Set default scopes if not provided
+        scopes = self.config.get("scope", "openid profile email")
+        
         return ElToroAuthenticator(
             client_id=self.config["client_id"],
             client_secret=self.config["client_secret"],
-            auth_endpoint="https://auth.api.eltoro.com/auth/realms/eltoro/protocol/openid-connect/token",
-            oauth_scopes=self.config.get("scope", ""),
+            auth_endpoint=auth_endpoint,
+            oauth_scopes=scopes,
         )
 
     @property

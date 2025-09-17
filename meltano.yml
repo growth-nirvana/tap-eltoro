@@ -60,6 +60,16 @@ plugins:
       label: Base URL
       description: The base URL for the API service (environment-specific)
 
+    - name: org_id
+      kind: string
+      label: Organization ID
+      description: El Toro Organization ID for API requests
+
+    - name: organization_ids
+      kind: array
+      label: Organization IDs
+      description: List of specific Organization IDs to fetch stats for
+
     - name: scope
       kind: string
       label: OAuth2 Scope
@@ -69,6 +79,12 @@ plugins:
       kind: date_iso8601
       label: Start Date
       description: The earliest record date to sync
+
+    - name: lookback_window_days
+      kind: integer
+      label: Lookback Window Days
+      description: Number of days to look back from the last bookmark to ensure no data is missed
+      default: 14
 
     - name: request_timeout
       kind: integer
@@ -99,6 +115,8 @@ plugins:
     config:
       environment: production
       base_url: https://platform.api.eltoro.com
+      scope: "openid profile email"
+      lookback_window_days: 14
       request_timeout: 60
       max_retries: 3
       retry_backoff_base: 2.0
@@ -106,6 +124,10 @@ plugins:
     secrets:
       client_id: ${TAP_ELTORO_CLIENT_ID}
       client_secret: ${TAP_ELTORO_CLIENT_SECRET}
+
+    select:
+      - organizations.*
+      - stats.*
 
   loaders:
   - name: target-jsonl

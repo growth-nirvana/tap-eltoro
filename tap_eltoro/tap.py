@@ -53,6 +53,18 @@ class TapElToro(Tap):
             description="The base URL for the API service (environment-specific)",
         ),
         th.Property(
+            "org_id",
+            th.StringType(nullable=True),
+            title="Organization ID",
+            description="El Toro Organization ID for API requests (optional - if not provided, stats will be fetched for all accessible organizations)",
+        ),
+        th.Property(
+            "organization_ids",
+            th.ArrayType(th.StringType()),
+            title="Organization IDs",
+            description="List of specific Organization IDs to fetch stats for (optional - if not provided, stats will be fetched for all accessible organizations)",
+        ),
+        th.Property(
             "scope",
             th.StringType(nullable=True),
             title="OAuth2 Scope",
@@ -62,6 +74,13 @@ class TapElToro(Tap):
             "start_date",
             th.DateTimeType(nullable=True),
             description="The earliest record date to sync",
+        ),
+        th.Property(
+            "lookback_window_days",
+            th.IntegerType(nullable=True),
+            default=14,
+            title="Lookback Window Days",
+            description="Number of days to look back from the last bookmark to ensure no data is missed",
         ),
         th.Property(
             "request_timeout",
@@ -102,8 +121,8 @@ class TapElToro(Tap):
             A list of discovered streams.
         """
         return [
-            streams.GroupsStream(self),
-            streams.UsersStream(self),
+            streams.OrganizationsStream(self),
+            streams.StatsStream(self),
         ]
 
 
