@@ -110,16 +110,10 @@ plugins:
       description: A custom User-Agent header to send with each request
 
     settings_group_validation:
-    - [environment, client_id, client_secret]
+    - [client_id, client_secret]
 
     config:
-      environment: production
-      base_url: https://platform.api.eltoro.com
-      scope: "openid profile email"
       lookback_window_days: 14
-      request_timeout: 60
-      max_retries: 3
-      retry_backoff_base: 2.0
 
     secrets:
       client_id: ${TAP_ELTORO_CLIENT_ID}

@@ -25,7 +25,7 @@ class TapElToro(Tap):
         th.Property(
             "environment",
             th.StringType(nullable=False),
-            required=True,
+            default="production",
             title="Environment",
             description="The environment to connect to (development or production)",
             allowed_values=["development", "production"],
@@ -49,6 +49,7 @@ class TapElToro(Tap):
         th.Property(
             "base_url",
             th.StringType(nullable=False),
+            default="https://platform.api.eltoro.com",
             title="Base URL",
             description="The base URL for the API service (environment-specific)",
         ),
@@ -66,9 +67,10 @@ class TapElToro(Tap):
         ),
         th.Property(
             "scope",
-            th.StringType(nullable=True),
+            th.StringType(nullable=False),
+            default="openid profile email",
             title="OAuth2 Scope",
-            description="Optional OAuth2 scope for token requests",
+            description="OAuth2 scope for token requests",
         ),
         th.Property(
             "start_date",

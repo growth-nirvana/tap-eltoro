@@ -584,6 +584,7 @@ class StatsStream(ElToroStream):
     schema = th.PropertiesList(
         # Identification fields
         th.Property("org_id", th.StringType, description="Organization ID"),
+        th.Property("date", th.DateType, description="Date of the stats record (extracted from start timestamp for daily reporting)"),
         th.Property("start", th.DateTimeType, description="Beginning of the search time frame"),
         th.Property("end", th.DateTimeType, description="End of the search time frame"),
         
@@ -776,6 +777,21 @@ class StatsStream(ElToroStream):
                         # Add other details metadata
                         if "results_count" in details:
                             record["results_count"] = details["results_count"]
+                        
+                        # Add time_frame from request (always DAY for daily reporting)
+                        record["time_frame"] = "DAY"
+                        
+                        # Extract date from start timestamp for daily reporting
+                        if "start" in record and record["start"]:
+                            try:
+                                # Parse the start timestamp and extract just the date part
+                                start_timestamp = record["start"]
+                                if isinstance(start_timestamp, str):
+                                    # Extract date part (YYYY-MM-DD) from timestamp
+                                    record["date"] = start_timestamp.split("T")[0]
+                            except Exception:
+                                # If parsing fails, leave date as None
+                                record["date"] = None
                         
                         yield record
 
