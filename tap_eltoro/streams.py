@@ -154,6 +154,412 @@ class OrganizationsStream(ElToroStream):
         }
 
 
+class CampaignsStream(ElToroStream):
+    """El Toro Campaigns stream for listing campaigns by organization."""
+
+    name = "campaigns"
+    path = "/v1/campaigns"
+    primary_keys: t.ClassVar[list[str]] = ["id"]
+    replication_key = "update_time"
+    parent_stream_type = OrganizationsStream
+    
+    @override
+    @property
+    def url_base(self) -> str:
+        """Return the API URL root for campaigns service (same as organizations/stats)."""
+        # Campaigns are also on the hagrid subdomain
+        environment = self.config.get("environment", "production")
+        if environment == "development":
+            return "https://hagrid.api.dev.eltoro.com"
+        else:
+            # For production, try without the 'dev' part
+            return "https://hagrid.api.eltoro.com"
+    
+    # Define the schema based on the API response structure
+    schema = th.PropertiesList(
+        # Core campaign fields
+        th.Property("id", th.StringType, description="ID of the Campaign"),
+        th.Property("name", th.StringType, description="Name of the Campaign"),
+        th.Property("org_id", th.StringType, description="Id of the org to which this campaign belongs"),
+        
+        # Timestamps
+        th.Property("create_time", th.DateTimeType, description="Time Campaign was created"),
+        th.Property("update_time", th.DateTimeType, description="Time Campaign was updated"),
+        th.Property("delete_time", th.DateTimeType, description="Time Campaign was deleted"),
+        th.Property("archive_time", th.DateTimeType, description="Time Campaign was archived"),
+        th.Property("start_time", th.DateTimeType, description="Date the Campaign should start"),
+        th.Property("end_time", th.DateTimeType, description="Date the Campaign should end"),
+        
+        # Status and metadata
+        th.Property("status", th.StringType, description="The status of the campaign"),
+        th.Property("ref_id", th.StringType, description="Client reference ID"),
+        
+        # Complex nested objects
+        th.Property("order_lines", th.ArrayType(th.ObjectType()), description="Order lines associated with the campaign"),
+        th.Property("political_transparency", th.ObjectType(), description="Political transparency information"),
+        th.Property("job_id", th.StringType, description="Job ID"),
+        th.Property("po_id", th.StringType, description="PO ID"),
+    ).to_dict()
+    
+    @property
+    def state_partitioning_keys(self) -> list[str] | None:
+        """Return state partitioning keys for the stream."""
+        return ["org_id"]
+    
+    @override
+    def get_url_params(
+        self, context: Context | None, next_page_token: t.Any | None
+    ) -> dict[str, t.Any]:
+        """Get URL parameters for the campaigns request."""
+        params = {}
+        
+        # Add pagination
+        if next_page_token:
+            params["page_token"] = next_page_token
+        
+        # Set page size (up to 1000 max)
+        params["page_size"] = 1000
+        
+        # Try to filter by org_id if we have it from context
+        if context and "org_id" in context:
+            # This might not work if the API doesn't support org_id filtering
+            # We'll test this and fall back to client-side filtering if needed
+            params["filter"] = f"org_id={context['org_id']}"
+        
+        return params
+    
+    @override
+    def parse_response(self, response: t.Any, context: Context | None = None) -> t.Iterable[dict]:
+        """Parse the campaigns response and yield individual records."""
+        data = response.json()
+        
+        # Get org_id from context for filtering
+        context_org_id = None
+        if context and "org_id" in context:
+            context_org_id = context["org_id"]
+        
+        # Parse campaigns
+        if "campaigns" in data:
+            for campaign in data["campaigns"]:
+                # If we have a context org_id, filter campaigns to match
+                if context_org_id and campaign.get("org_id") != context_org_id:
+                    # Skip campaigns that don't belong to this org
+                    continue
+                
+                yield campaign
+    
+    @override
+    def get_next_page_token(
+        self, 
+        response: t.Any, 
+        previous_token: t.Any | None
+    ) -> t.Any | None:
+        """Extract next page token from response."""
+        data = response.json()
+        return data.get("next_page_token")
+
+
+class OrderLinesStream(ElToroStream):
+    """El Toro Order Lines stream for listing order lines by organization."""
+
+    name = "order_lines"
+    path = "/v1/order-lines"
+    primary_keys: t.ClassVar[list[str]] = ["id"]
+    replication_key = "update_time"
+    parent_stream_type = OrganizationsStream
+    
+    @override
+    @property
+    def url_base(self) -> str:
+        """Return the API URL root for order lines service (same as organizations/stats/campaigns)."""
+        # Order lines are also on the hagrid subdomain
+        environment = self.config.get("environment", "production")
+        if environment == "development":
+            return "https://hagrid.api.dev.eltoro.com"
+        else:
+            return "https://hagrid.api.eltoro.com"
+    
+    # Define the schema based on the API response structure
+    schema = th.PropertiesList(
+        # Core order line fields
+        th.Property("id", th.StringType, description="ID of the Order Line"),
+        th.Property("name", th.StringType, description="Name of the Order Line"),
+        th.Property("ref_id", th.StringType, description="Client reference ID of the Order Line"),
+        th.Property("org_id", th.StringType, description="ID of the Organization that this Order Line is associated to"),
+        
+        # Campaign relationship (for SQL joins)
+        th.Property("campaign_id", th.StringType, description="ID of the Campaign that this Order Line is associated to"),
+        th.Property("campaign_name", th.StringType, description="Name of the Campaign that this Order Line is associated to"),
+        
+        # Timing
+        th.Property("start_time", th.DateTimeType, description="Time the Order Line will start serving"),
+        th.Property("end_time", th.DateTimeType, description="Time the Order Line will stop serving"),
+        th.Property("create_time", th.DateTimeType, description="Time the Order Line was created at"),
+        th.Property("update_time", th.DateTimeType, description="Time the Order Line was updated at"),
+        th.Property("delete_time", th.DateTimeType, description="Time the Order Line was deleted at"),
+        th.Property("archive_time", th.DateTimeType, description="The time the OrderLine was archived at"),
+        th.Property("first_deploy_time", th.DateTimeType, description="Time the Order Line was first deployed"),
+        th.Property("last_deploy_time", th.DateTimeType, description="Time the Order Line was last deployed"),
+        th.Property("migrated_at", th.DateTimeType, description="Time the Order Line was migrated"),
+        
+        # Impressions and serving
+        th.Property("impressions", th.IntegerType, description="The amount of impressions the Order Line will serve"),
+        th.Property("minimum_impressions", th.IntegerType, description="The minimum impressions of the OrderLine"),
+        th.Property("impressions_per_day", th.IntegerType, description="The amount of impressions the Order Line will serve per day"),
+        th.Property("free_impressions", th.IntegerType, description="The amount of impressions adops is giving to the orderline for free"),
+        
+        # URLs and targeting
+        th.Property("click_through_url", th.StringType, description="The URL the user will be redirected to if the creative is clicked"),
+        th.Property("step_function", th.StringType, description="The name of the step function if deployment_destination is GENERIC"),
+        
+        # Status and state
+        th.Property("status", th.StringType, description="Status of the Order line"),
+        th.Property("state", th.StringType, description="State of the Order Line"),
+        th.Property("reason", th.StringType, description="Reason the Order Line is/was in ERRORED status"),
+        
+        # Business logic flags
+        th.Property("prepay", th.BooleanType, description="Whether or not the Order Line needs to be paid for before it is deployed"),
+        th.Property("political", th.BooleanType, description="Whether or not an Order Line is part of a political campaign"),
+        th.Property("locked", th.BooleanType, description="Whether or not this Order Line is locked and cannot be updated"),
+        th.Property("paid", th.BooleanType, description="Whether or not the Order Line has been paid for"),
+        
+        # Enums
+        th.Property("template_type", th.StringType, description="Template type"),
+        th.Property("deployment_destination", th.StringType, description="The Deployment destination for the Order Line"),
+        th.Property("ad_type", th.StringType, description="Ad Type"),
+        
+        # User IDs
+        th.Property("first_deploy_user_id", th.StringType, description="ID of the User that first deployed the Order Line"),
+        th.Property("last_deploy_user_id", th.StringType, description="ID of the User that last deployed the Order Line"),
+        
+        # Job and PO IDs
+        th.Property("job_id", th.StringType, description="Job ID"),
+        th.Property("po_id", th.StringType, description="PO ID"),
+        
+        # Complex nested objects (stored as JSON)
+        th.Property("political_fields", th.ObjectType(), description="Political fields"),
+        th.Property("segment_config", th.ObjectType(), description="Segment configuration"),
+        th.Property("cpm_override", th.ObjectType(), description="CPM override configuration"),
+        th.Property("campaign", th.ObjectType(), description="Campaign object"),
+        th.Property("political_transparency", th.ObjectType(), description="Political transparency information"),
+        th.Property("deploy_metadata", th.ObjectType(), description="Deployment metadata"),
+        th.Property("cost_range", th.ObjectType(), description="Cost range configuration"),
+        th.Property("audit_conditions", th.ObjectType(), description="Audit conditions"),
+        th.Property("deployment_destination_configuration", th.ObjectType(), description="Deployment destination configuration"),
+        th.Property("highest_cpm_audience", th.ObjectType(), description="Highest CPM audience"),
+        th.Property("cpm", th.ObjectType(), description="CPM configuration"),
+        th.Property("audience_upcharges", th.ObjectType(), description="Audience upcharges"),
+        th.Property("cpms", th.ObjectType(), description="CPMs configuration"),
+        th.Property("review", th.ObjectType(), description="Review information"),
+        
+        # Arrays
+        th.Property("data_sources_highest_upcharge", th.ArrayType(th.ObjectType()), description="Data sources highest upcharge"),
+        th.Property("creatives", th.ArrayType(th.ObjectType()), description="Creatives associated with the order line"),
+        th.Property("audiences", th.ArrayType(th.ObjectType()), description="Audiences associated with the order line"),
+        th.Property("notes", th.ArrayType(th.ObjectType()), description="Notes on the order line"),
+        
+        # Simple fields that might be in nested objects
+        th.Property("cpm_key", th.StringType, description="The CPM key of the CPM"),
+    ).to_dict()
+    
+    @property
+    def state_partitioning_keys(self) -> list[str] | None:
+        """Return state partitioning keys for the stream."""
+        return ["org_id"]
+    
+    @override
+    def get_url_params(
+        self, context: Context | None, next_page_token: t.Any | None
+    ) -> dict[str, t.Any]:
+        """Get URL parameters for the order lines request."""
+        params = {}
+        
+        # Add pagination
+        if next_page_token:
+            params["page_token"] = next_page_token
+        
+        # Set page size (up to 1000 max)
+        params["page_size"] = 1000
+        
+        # Try to filter by org_id if we have it from context
+        if context and "org_id" in context:
+            # This might not work if the API doesn't support org_id filtering
+            # We'll test this and fall back to client-side filtering if needed
+            params["filter"] = f"org_id={context['org_id']}"
+        
+        return params
+    
+    @override
+    def parse_response(self, response: t.Any, context: Context | None = None) -> t.Iterable[dict]:
+        """Parse the order lines response and yield individual records."""
+        data = response.json()
+        
+        # Get org_id from context for filtering
+        context_org_id = None
+        if context and "org_id" in context:
+            context_org_id = context["org_id"]
+        
+        # Parse order lines
+        if "order_lines" in data:
+            for order_line in data["order_lines"]:
+                # If we have a context org_id, filter order lines to match
+                if context_org_id and order_line.get("org_id") != context_org_id:
+                    # Skip order lines that don't belong to this org
+                    continue
+                
+                # Extract campaign information for SQL joins
+                campaign = order_line.get("campaign", {})
+                if isinstance(campaign, dict):
+                    order_line["campaign_id"] = campaign.get("id")
+                    order_line["campaign_name"] = campaign.get("name")
+                
+                yield order_line
+    
+    @override
+    def get_next_page_token(
+        self, 
+        response: t.Any, 
+        previous_token: t.Any | None
+    ) -> t.Any | None:
+        """Extract next page token from response."""
+        data = response.json()
+        return data.get("next_page_token")
+
+
+class CreativesStream(ElToroStream):
+    """El Toro Creatives stream for listing creatives by organization."""
+
+    name = "creatives"
+    path = "/v1/creatives"
+    primary_keys: t.ClassVar[list[str]] = ["id"]
+    replication_key = "update_time"
+    parent_stream_type = OrganizationsStream
+    
+    @override
+    @property
+    def url_base(self) -> str:
+        """Return the API URL root for creatives service (same as organizations/stats/campaigns/order_lines)."""
+        # Creatives are also on the hagrid subdomain
+        environment = self.config.get("environment", "production")
+        if environment == "development":
+            return "https://hagrid.api.dev.eltoro.com"
+        else:
+            return "https://hagrid.api.eltoro.com"
+    
+    # Define the schema based on the API response structure
+    schema = th.PropertiesList(
+        # Core creative fields
+        th.Property("id", th.StringType, description="ID of the Creative"),
+        th.Property("name", th.StringType, description="The official name of the Creative"),
+        th.Property("org_id", th.StringType, description="ID of the org the Creative belongs to"),
+        
+        # Timestamps
+        th.Property("create_time", th.DateTimeType, description="The creation timestamp of the Creative"),
+        th.Property("update_time", th.DateTimeType, description="The last update timestamp of the Creative"),
+        th.Property("delete_time", th.DateTimeType, description="The deletion timestamp of the Creative"),
+        th.Property("archive_time", th.DateTimeType, description="The archival timestamp of the Creative"),
+        th.Property("expire_time", th.DateTimeType, description="The expiration timestamp of the Creative"),
+        th.Property("purge_time", th.DateTimeType, description="The purge timestamp of the Creative"),
+        
+        # Status and classification
+        th.Property("status", th.StringType, description="Status of the Creative"),
+        th.Property("type", th.StringType, description="Type of Creative (banner, video, etc.)"),
+        th.Property("ad_type", th.StringType, description="Ad type of Creative (banner, video, native, etc.)"),
+        th.Property("audit_status", th.StringType, description="Audit status of the creative"),
+        th.Property("category", th.StringType, description="Category of the Creative"),
+        
+        # Creative properties
+        th.Property("height", th.IntegerType, description="Height of the Creative file in pixels"),
+        th.Property("width", th.IntegerType, description="Width of the Creative file in pixels"),
+        th.Property("ad_tag", th.StringType, description="Ad tag of the Creative"),
+        th.Property("folder", th.StringType, description="The folder that the Creative resides in"),
+        th.Property("thumbnail", th.StringType, description="Thumbnail for the Creative"),
+        th.Property("ott_ready", th.BooleanType, description="Whether a video Creative meets all the OTT Video Specifications"),
+        
+        # Complex nested objects and arrays
+        th.Property("files", th.ArrayType(th.ObjectType(
+            th.Property("id", th.StringType, description="ID of the Creative file"),
+            th.Property("name", th.StringType, description="The official name of the Creative File"),
+            th.Property("creative_id", th.StringType, description="ID of the creative object the file connected to"),
+            th.Property("create_time", th.DateTimeType, description="Date and time a Creative File was created at"),
+            th.Property("update_time", th.DateTimeType, description="Date and time a Creative File was last updated"),
+            th.Property("delete_time", th.DateTimeType, description="Date and time a Creative File was deleted"),
+            th.Property("type", th.StringType, description="Type of the creative file"),
+            th.Property("sub_type", th.StringType, description="Subtype of the creative file"),
+            th.Property("bucket", th.StringType, description="S3 Bucket where the Creative File is stored"),
+            th.Property("key", th.StringType, description="S3 Key of the Creative File"),
+            th.Property("mime", th.StringType, description="IANA published MIME type"),
+            th.Property("size", th.IntegerType, description="The byte size of the creative file"),
+            th.Property("height", th.IntegerType, description="Height of the creative file in pixels"),
+            th.Property("width", th.IntegerType, description="Width of the creative file in pixels"),
+            th.Property("etag", th.StringType, description="eTag of the creative file"),
+            th.Property("uri", th.StringType, description="URI that the creative is connected to when serving"),
+            th.Property("duration", th.IntegerType, description="The length of videos creatives"),
+            th.Property("extension", th.StringType, description="The file extension"),
+            th.Property("bitrate", th.IntegerType, description="The bitrate"),
+        )), description="Files associated with the Creative"),
+        
+        th.Property("order_lines", th.ArrayType(th.ObjectType()), description="Order lines associated with the creative"),
+        th.Property("native_metadata", th.ObjectType(), description="Native metadata for the creative"),
+        th.Property("audits", th.ArrayType(th.ObjectType()), description="Audit information for the creative"),
+    ).to_dict()
+    
+    @property
+    def state_partitioning_keys(self) -> list[str] | None:
+        """Return state partitioning keys for the stream."""
+        return ["org_id"]
+    
+    @override
+    def get_url_params(
+        self, context: Context | None, next_page_token: t.Any | None
+    ) -> dict[str, t.Any]:
+        """Get URL parameters for the creatives request."""
+        params = {}
+        
+        # Add pagination
+        if next_page_token:
+            params["page_token"] = next_page_token
+        
+        # Set page size (up to 1000 max)
+        params["page_size"] = 1000
+        
+        # Temporarily remove org_id filter to test if that's causing 503 error
+        # if context and "org_id" in context:
+        #     params["filter"] = f"org_id={context['org_id']}"
+        
+        return params
+    
+    @override
+    def parse_response(self, response: t.Any, context: Context | None = None) -> t.Iterable[dict]:
+        """Parse the creatives response and yield individual records."""
+        data = response.json()
+        
+        # Get org_id from context for filtering
+        context_org_id = None
+        if context and "org_id" in context:
+            context_org_id = context["org_id"]
+        
+        # Parse creatives
+        if "creatives" in data:
+            for creative in data["creatives"]:
+                # If we have a context org_id, filter creatives to match
+                if context_org_id and creative.get("org_id") != context_org_id:
+                    # Skip creatives that don't belong to this org
+                    continue
+                
+                yield creative
+    
+    @override
+    def get_next_page_token(
+        self, 
+        response: t.Any, 
+        previous_token: t.Any | None
+    ) -> t.Any | None:
+        """Extract next page token from response."""
+        data = response.json()
+        return data.get("next_page_token")
+
+
 class StatsStream(ElToroStream):
     """El Toro Statistics stream for campaign performance data."""
 

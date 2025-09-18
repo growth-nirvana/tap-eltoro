@@ -127,6 +127,9 @@ plugins:
 
     select:
       - organizations.*
+      - campaigns.*
+      - order_lines.*
+      - creatives.*
       - stats.*
 
   loaders:

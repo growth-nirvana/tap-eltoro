@@ -122,6 +122,9 @@ class TapElToro(Tap):
         """
         return [
             streams.OrganizationsStream(self),
+            streams.CampaignsStream(self),
+            streams.OrderLinesStream(self),
+            streams.CreativesStream(self),
             streams.StatsStream(self),
         ]
 
