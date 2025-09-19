@@ -564,8 +564,8 @@ class StatsStream(ElToroStream):
     """El Toro Statistics stream for campaign performance data."""
 
     name = "stats"
-    primary_keys: t.ClassVar[list[str]] = ["org_id", "start", "end"]
-    replication_key = "start"
+    primary_keys: t.ClassVar[list[str]] = ["org_id", "date", "creative_id", "order_line_id", "campaign_id"]
+    replication_key = "date"
     parent_stream_type = OrganizationsStream
     
     @override
