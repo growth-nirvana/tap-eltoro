@@ -114,6 +114,7 @@ plugins:
 
     config:
       lookback_window_days: 14
+      start_date: 2025-01-01
 
     secrets:
       client_id: ${TAP_ELTORO_CLIENT_ID}
