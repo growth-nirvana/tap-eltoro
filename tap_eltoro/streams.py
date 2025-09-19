@@ -361,7 +361,7 @@ class OrderLinesStream(ElToroStream):
         # Simple fields that might be in nested objects
         th.Property("cpm_key", th.StringType, description="The CPM key of the CPM"),
     ).to_dict()
-    
+
     @property
     def state_partitioning_keys(self) -> list[str] | None:
         """Return state partitioning keys for the stream."""
@@ -666,30 +666,31 @@ class StatsStream(ElToroStream):
         lookback_days = self.config.get("lookback_window_days", 14)
         
         # Get the starting timestamp with state management
-        start_date = self.get_starting_timestamp(context)
+        bookmark = self.get_starting_timestamp(context)
         
-        if start_date is None:
+        if bookmark is None:
             # No previous state - use configured start_date or default to 30 days ago
             if self.config.get("start_date"):
                 start_date = self.config["start_date"]
+                if isinstance(start_date, str):
+                    try:
+                        start_date = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
+                    except ValueError:
+                        start_date = datetime.strptime(start_date.replace('Z', ''), '%Y-%m-%dT%H:%M:%S')
             else:
                 start_date = datetime.now() - timedelta(days=30)
         else:
-            # Apply lookback window to ensure we don't miss data
-            start_date = start_date - timedelta(days=lookback_days)
+            # Incremental sync: Apply lookback window to bookmark
+            start_date = bookmark - timedelta(days=lookback_days)
         
-        # For chunked windows, use 7-day chunks [[memory:3081053]]
-        end_date = start_date + timedelta(days=7)
+        # End date is current time (request entire range at once)
+        from datetime import timezone
+        end_date = datetime.now(timezone.utc)
         
-        # Ensure timezone-aware comparison
-        now = datetime.now()
-        if hasattr(start_date, 'tzinfo') and start_date.tzinfo is not None:
-            # start_date is timezone-aware, make now timezone-aware too
-            from datetime import timezone
-            now = datetime.now(timezone.utc)
-        
-        if end_date > now:
-            end_date = now
+        # Ensure start_date is timezone-aware for consistent formatting
+        if hasattr(start_date, 'tzinfo') and start_date.tzinfo is None:
+            # start_date is naive, make it UTC
+            start_date = start_date.replace(tzinfo=timezone.utc)
 
         payload = {
             "start_time": start_date.strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -706,6 +707,13 @@ class StatsStream(ElToroStream):
             "level_of_detail": ["org_id", "campaign_id", "order_line_id", "creative_id"],
         }
 
+        # Add pagination support
+        if next_page_token:
+            payload["page_token"] = next_page_token
+        
+        # Set page size (use max for efficiency)
+        payload["page_size"] = 1000
+        
         # Add optional filters if configured
         if self.config.get("campaign_ids"):
             payload["campaign_id"] = self.config["campaign_ids"]
@@ -714,11 +722,15 @@ class StatsStream(ElToroStream):
         if self.config.get("order_line_ids"):
             payload["order_line_id"] = self.config["order_line_ids"]
 
+        # Log the date range being requested
+        self.logger.info(f"[STATS] Requesting data from {payload['start_time']} to {payload['end_time']} (page_token: {next_page_token})")
+
         return payload
 
     def parse_response(self, response: t.Any, context: Context | None = None) -> t.Iterable[dict]:
         """Parse the stats response and yield individual records."""
         data = response.json()
+        
         
         # Get org_id from context or config
         context_org_id = None
@@ -737,10 +749,12 @@ class StatsStream(ElToroStream):
         if "results" in data:
             for result_group in data["results"]:
                 if "results" in result_group:
-                    results = result_group["results"]
+                    # Get the IDs for this specific result group
+                    group_details = result_group.get("details", {})
+                    group_ids = group_details.get("ids", {})
                     
-                    # Match each result with its corresponding ID combination
-                    for idx, result in enumerate(results):
+                    # Process all results in this group with the same ID combination
+                    for result in result_group["results"]:
                         # Start with the base result
                         record = dict(result)
                         
@@ -748,35 +762,20 @@ class StatsStream(ElToroStream):
                         if context_org_id:
                             record["org_id"] = context_org_id
                         
-                        # Add corresponding IDs from details.ids array
-                        if isinstance(ids_data, list) and idx < len(ids_data):
-                            # Each result corresponds to an ID combination at the same index
-                            id_combo = ids_data[idx]
-                            if isinstance(id_combo, dict):
-                                # Add all IDs from this specific combination
-                                if "campaign_id" in id_combo:
-                                    record["campaign_id"] = id_combo["campaign_id"]
-                                if "order_line_id" in id_combo:
-                                    record["order_line_id"] = id_combo["order_line_id"]
-                                if "creative_id" in id_combo:
-                                    record["creative_id"] = id_combo["creative_id"]
-                                if "org_id" in id_combo:
-                                    record["details_org_id"] = id_combo["org_id"]
+                        # Add IDs from this result group's details.ids
+                        if isinstance(group_ids, dict):
+                            if "campaign_id" in group_ids:
+                                record["campaign_id"] = group_ids["campaign_id"]
+                            if "order_line_id" in group_ids:
+                                record["order_line_id"] = group_ids["order_line_id"]
+                            if "creative_id" in group_ids:
+                                record["creative_id"] = group_ids["creative_id"]
+                            if "org_id" in group_ids:
+                                record["details_org_id"] = group_ids["org_id"]
                         
-                        # If ids_data is a single dict (fallback for simpler responses)
-                        elif isinstance(ids_data, dict):
-                            if "campaign_id" in ids_data:
-                                record["campaign_id"] = ids_data["campaign_id"]
-                            if "order_line_id" in ids_data:
-                                record["order_line_id"] = ids_data["order_line_id"]
-                            if "creative_id" in ids_data:
-                                record["creative_id"] = ids_data["creative_id"]
-                            if "org_id" in ids_data:
-                                record["details_org_id"] = ids_data["org_id"]
-                        
-                        # Add other details metadata
-                        if "results_count" in details:
-                            record["results_count"] = details["results_count"]
+                        # Add other details metadata from this group
+                        if "results_count" in group_details:
+                            record["results_count"] = group_details["results_count"]
                         
                         # Add time_frame from request (always DAY for daily reporting)
                         record["time_frame"] = "DAY"
@@ -834,6 +833,24 @@ class StatsStream(ElToroStream):
     ) -> dict[str, t.Any]:
         """Return URL parameters (none needed for POST request)."""
         return {}
+
+    @override
+    def get_next_page_token(
+        self, 
+        response: t.Any, 
+        previous_token: t.Any | None
+    ) -> t.Any | None:
+        """Extract next page token from API response."""
+        data = response.json()
+        next_token = data.get("next_page_token")
+        
+        # Log pagination status
+        if next_token:
+            self.logger.info(f"[STATS] API returned next_page_token: {next_token}")
+        else:
+            self.logger.info("[STATS] No next_page_token - reached end of data")
+        
+        return next_token
 
     @property
     def rest_method(self) -> str:
