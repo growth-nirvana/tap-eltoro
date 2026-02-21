@@ -219,12 +219,9 @@ class CampaignsStream(ElToroStream):
         
         # Set page size (up to 1000 max)
         params["page_size"] = 1000
-        
-        # Try to filter by org_id if we have it from context
-        if context and "org_id" in context:
-            # This might not work if the API doesn't support org_id filtering
-            # We'll test this and fall back to client-side filtering if needed
-            params["filter"] = f"org_id={context['org_id']}"
+
+        # Do not send org_id server-side filter. API currently returns 500
+        # for filter=org_id=...; we filter by org_id client-side instead.
         
         return params
     
@@ -380,12 +377,9 @@ class OrderLinesStream(ElToroStream):
         
         # Set page size (up to 1000 max)
         params["page_size"] = 1000
-        
-        # Try to filter by org_id if we have it from context
-        if context and "org_id" in context:
-            # This might not work if the API doesn't support org_id filtering
-            # We'll test this and fall back to client-side filtering if needed
-            params["filter"] = f"org_id={context['org_id']}"
+
+        # Do not send org_id server-side filter. API currently returns 500
+        # for filter=org_id=...; we filter by org_id client-side instead.
         
         return params
     
